@@ -1,0 +1,170 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow-webserver
+  namespace: airflow-service
+  labels:
+    run: airflow-webserver
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 8080
+      targetPort: airflow-web
+      protocol: TCP
+      name: http
+  selector:
+    run: airflow-webserver
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow-db
+  namespace: airflow-service
+  labels:
+    run: airflow-db
+spec:
+  type: NodePort
+  ports:
+    - port: 5432
+      targetPort: postgres-db
+      protocol: TCP
+  selector:
+    run: airflow-db
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-db
+  namespace: airflow-service
+spec:
+  selector:
+    matchLabels:
+      run: airflow-db
+  replicas: 1
+  template:
+    metadata:
+      namespace: airflow-service
+      labels:
+        run: airflow-db
+    spec:
+      volumes:
+        - name: postgres-data
+          hostPath:
+            path: /Users/mehmetg/airflow/db-data
+            type: Directory
+      containers:
+        - name: airflow-db
+          image: postgres:13.1
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 5432
+              name: postgres-db
+          volumeMounts:
+            - mountPath: /var/lib/postgresql/data
+              name: postgres-data
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-webserver
+  namespace: airflow-service
+spec:
+  selector:
+    matchLabels:
+      run: airflow-webserver
+  replicas: 3
+  template:
+    metadata:
+      namespace: airflow-service
+      labels:
+        run: airflow-webserver
+    spec:
+      volumes:
+        - name: airflow-config
+          hostPath:
+            path: /Users/mehmetg/airflow/airflow.cfg
+      initContainers:
+        - name: check-db-ready
+          image: postgres:13.1
+          imagePullPolicy: Never
+          command: [ 'sh', '-c',
+              'until pg_isready -h airflow-db -d airflow -U airflow -p 5432;
+                do echo waiting for database; sleep 2; done;' ]
+      containers:
+        - name: airflow-webserver
+          image: airflow:latest
+          imagePullPolicy: Never
+          command:
+            - airflow
+            - webserver
+          ports:
+            - containerPort: 8080
+              name: airflow-web
+          volumeMounts:
+            - mountPath: /airflow/airflow.cfg
+              name: airflow-config
+          env:
+            - name: AIRFLOW__CORE__FERNET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-service-secrets
+                  key: airflow-fernet-key
+            - name: AIRFLOW__CORE__SQL_ALCHEMY_CONN
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-service-secrets
+                  key: airflow-sql-alchemy-conn
+            - name: AIRFLOW__WEBSERVER__SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-web-secrets
+                  key: airflow-flask-secret-key
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-scheduler
+  namespace: airflow-service
+spec:
+  selector:
+    matchLabels:
+      run: airflow-scheduler
+  replicas: 1
+  template:
+    metadata:
+      namespace: airflow-service
+      labels:
+        run: airflow-scheduler
+    spec:
+      volumes:
+        - name: airflow-config
+          hostPath:
+            path: /Users/mehmetg/airflow/airflow.cfg
+      initContainers:
+        - name: check-db-ready
+          image: postgres:13.1
+          imagePullPolicy: Never
+          command: [ 'sh', '-c',
+              'until pg_isready -h airflow-db -d airflow -U airflow -p 5432;
+                do echo waiting for database; sleep 2; done;' ]
+      containers:
+        - name: airflow-scheduler
+          image: airflow:latest
+          imagePullPolicy: Never
+          command:
+            - airflow
+            - scheduler
+          volumeMounts:
+            - mountPath: /airflow/airflow.cfg
+              name: airflow-config
+          env:
+            - name: AIRFLOW__CORE__FERNET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-service-secrets
+                  key: airflow-fernet-key
+            - name: AIRFLOW__CORE__SQL_ALCHEMY_CONN
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-service-secrets
+                  key: airflow-sql-alchemy-conn

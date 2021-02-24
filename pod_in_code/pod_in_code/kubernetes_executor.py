@@ -9,11 +9,7 @@ class KubernetesExecutor(kubernetes_executor.KubernetesExecutor):
 
 
 class KubernetesExecutorPlugin(AirflowPlugin):
-    name = "voleon_kubernetes_plugin"
+    name = "kubernetes_plugin"
     executors = [KubernetesExecutor]
     operators = [
-        DcosSecretsDirective,
-        MesosExecutorConfig,
-        MesosVolume,
-        get_default_mesos_executor_config,
     ]
